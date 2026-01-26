@@ -179,7 +179,8 @@ class Common_c extends BaseController
         if ($this->request->getMethod() == 'post') {
             $validation->reset();
 
-            $currentCustomer = $this->session->get('customer');
+            $sso_details = $this->session->get(SSO_SESSION);
+            $currentCustomer = $this->session->get('customer'); // Old logic
 
             $rules = [
                 'cases_title' => 'required',
@@ -190,33 +191,33 @@ class Common_c extends BaseController
             ];
 
             if (empty($currentCustomer)) {
-                $rules['howtocontact'] = 'required|in_list[Email,Mobile,Both]';
+                // $rules['howtocontact'] = 'required|in_list[Email,Mobile,Both]';
             }
 
-            $howToContact = $this->request->getPost('howtocontact');
-            switch ($howToContact) {
-                case 'Email':
-                    $rules['customer_email'] = "required|valid_email";
-                    break;
-                case 'Mobile':
-                    $rules['customer_contact'] = "required|numeric|exact_length[10]";
-                    break;
-                case 'Both':
-                    $rules['customer_email'] = "required|valid_email";
-                    $rules['customer_contact'] = "required|numeric|exact_length[10]";
-                    break;
-                default:
-                    break;
-            };
+            // $howToContact = $this->request->getPost('howtocontact');
+            // switch ($howToContact) {
+            //     case 'Email':
+            //         $rules['customer_email'] = "required|valid_email";
+            //         break;
+            //     case 'Mobile':
+            //         $rules['customer_contact'] = "required|numeric|exact_length[10]";
+            //         break;
+            //     case 'Both':
+            //         $rules['customer_email'] = "required|valid_email";
+            //         $rules['customer_contact'] = "required|numeric|exact_length[10]";
+            //         break;
+            //     default:
+            //         break;
+            // };
 
             $validation->setRules($rules, [
                 'cases_title' => [
                     'required' => 'Title field is required.',
                 ],
-                'howtocontact' => [
-                    'required' => 'How to contact field is required.',
-                    'in_list' => 'How to contact field must be one of: Email, Mobile, Both.'
-                ],
+                // 'howtocontact' => [
+                //     'required' => 'How to contact field is required.',
+                //     'in_list' => 'How to contact field must be one of: Email, Mobile, Both.'
+                // ],
                 'cases_party_name' => [
                     'required' => 'Party name field is required.',
                     'alpha_space' => 'Party name field may only contain alphabetical characters and spaces.',
@@ -247,11 +248,13 @@ class Common_c extends BaseController
                     $customer_id = $currentCustomer['customer_id'];
                 } else {
                     $customer_data = [
-                        'customer_email_id' => $this->request->getPost('customer_email'),
-                        'customer_mobile_no' => $this->request->getPost('customer_contact'),
+                        'customer_email_id' => $sso_details['email'],
+                        'customer_mobile_no' => $sso_details['mobile'],
                         'customer_email_password' => generateStrongPassword(),
+                        'customer_first_name' => $sso_details['name'],
                     ];
                     $customer_id = $this->Cases_m->create_customer($customer_data);
+                    // dd($customer_data, $customer_id);
                 }
 
                 $case_data = [
@@ -299,28 +302,35 @@ class Common_c extends BaseController
                     // }
                     
                     if ($imagefile = $this->request->getFiles()) {
-                        if($imagefile){
-                            foreach ($imagefile['case_files_file'] as $img) {
-                                $params = array();
-                                if ($img->isValid() && ! $img->hasMoved()) {
-                                    $filepath = WRITEPATH . 'uploads/' . $img->store('doc/causes/');
-                                    $newName = $img->getRandomName();
-                                    $originalName = $img->getClientName();
-                                    $uploaded_fileinfo = new File($filepath);
-                                    $ext = $img->getClientExtension();
-                                    $params['refCases_id'] = $res;
-                                    $params['case_files_title'] = $_POST['title_file'][$i];
-                                    $params['case_files_desc'] = $_POST['desc_file'][$i];
-                                    $params['case_files_name'] =$newName;
-                                    $params['case_files_unique_name'] = $originalName;
-                                    $params['case_files_ext'] =  $ext;
-                                    $params['case_files_size'] = $uploaded_fileinfo->getSizeByUnit('kb');
-                                    $params['case_files_type'] = "main";
-                                }
+                        $i = 0;
+                        foreach ($imagefile['case_files_file'] as $img) {
+                            $params = array();
+                            if ($img->isValid() && ! $img->hasMoved()) {
+
+                                $newName      = $img->getRandomName();
+                                $originalName = $img->getClientName();
+                                $ext          = $img->getClientExtension();
+                                $sizeKb       = $img->getSizeByUnit('kb');                       
+
+                                $storedPath = $img->store('doc/causes/', $newName);
+                                $filepath   = WRITEPATH . 'uploads/' . $storedPath;
+
+                                $file = new File($filepath);
+
+                                $params = [
+                                    'refCases_id'            => $res,
+                                    'case_files_title'       => $_POST['title_file'][$i] ?? null,
+                                    'case_files_desc'        => $_POST['desc_file'][$i] ?? null,
+                                    'case_files_name'        => $newName,
+                                    'case_files_unique_name' => $originalName,
+                                    'case_files_ext'         => $ext,
+                                    'case_files_size'        => $sizeKb,
+                                    'case_files_type'        => 'main',
+                                ];
                             }
+                            $this->Cases_m->add_cases_files($params);
+                            $i = $i + 1;
                         }
-                       
-                    
                     }
 
                     $params = array();
@@ -334,11 +344,11 @@ class Common_c extends BaseController
                     $this->Cases_m->add_cases_comment($params);
                 } else {
                     successOrErrorMessage("Somthing happen wrong plz try again", 'error');
-                    return redirect()->route('auth-customer')->with('error', 'Somthing happen wrong plz try again.');
+                    return redirect()->route('case.list')->with('error', 'Somthing happen wrong plz try again.');
                 }
 
                 successOrErrorMessage("Request sent successfully", 'success');
-                return redirect()->route('auth-customer')->with('success', 'Request sent successfully.');
+                return redirect()->route('case.list')->with('success', 'Request sent successfully.');
             }
         }
 
