@@ -99,7 +99,7 @@
                                                 <td><?= $fdrow['case_files_desc'] ?></td>
                                                 <td><a href="<?=  base_url('uploads/doc/causes/' . $fdrow['case_files_name'] ) ?>" target="_blank">View</a></td>                                                
                                                 <td><a href="<?=  base_url('uploads/doc/causes/' . $fdrow['case_files_name'] ) ?>" download>Download</a></td>                                                
-                                            </tr>                                        
+                                            </tr>
                                         <?php endforeach; ?>
                                     </tbody>
                                 </table>

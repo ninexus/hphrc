@@ -96,32 +96,33 @@ class Home_c extends BaseController
     public function downloadList()
     {
         $category_code = $this->request->getVar('category_code');
-        $searchValue = $this->request->getVar('search.value');
-
-        $model = new Downloads();
-        $total = $model->where('upload_file_type', $category_code)->countAllResults();
+        $searchValue   = $this->request->getVar('search.value');
 
         $db = \Config\Database::connect();
 
+        /* ------------------------------
+        * Pagination defaults
+        * ------------------------------ */
         $offset = 0;
-        $limit = 10;
-        $order = '';
+        $limit  = 10;
+        $order  = '';
         $column = '';
 
-        if ($this->request->getVar('start')) {
-            $offset = $this->request->getVar('start');
+        if ($this->request->getVar('start') !== null) {
+            $offset = (int) $this->request->getVar('start');
         }
 
-        if ($this->request->getVar('length')) {
-            $limit = $this->request->getVar('length');
+        if ($this->request->getVar('length') !== null) {
+            $limit = (int) $this->request->getVar('length');
         }
 
+        /* ------------------------------
+        * Ordering (DataTables)
+        * ------------------------------ */
         if ($this->request->getVar('order')) {
             foreach ($this->request->getVar('order') as $req) {
-                if ($req['dir']) {
-                    $order = $req['dir'];
-                }
-    
+                $order = $req['dir'] ?? 'asc';
+
                 switch ($req['column']) {
                     case 1:
                         $column = 'huf.upload_file_ref_no';
@@ -133,52 +134,114 @@ class Home_c extends BaseController
                         $column = 'hc.category_title';
                         break;
                     default:
-                        $column = '';
+                        $column = 'huf.upload_file_id';
                         break;
                 }
             }
         }
 
-        $builder = $db->table('hpshrc_upload_files huf');
-        $builder->select('huf.upload_file_id, huf.upload_file_original_name, huf.upload_file_title, huf.upload_file_desc, huf.upload_file_ref_no, huf.upload_file_type, huf.upload_file_sub_type, huf.upload_file_status, huf.upload_file_location, hc.category_title');
-        $builder->where('huf.upload_file_status', 'ACTIVE');
-        $builder->where('huf.upload_file_type', $category_code);
-        if ($searchValue) {
-            $builder->like('huf.upload_file_title', $searchValue);
-            $builder->orLike('huf.upload_file_ref_no', $searchValue);
-            $builder->orLike('hc.category_title', $searchValue);
+        /* ------------------------------
+        * TOTAL RECORDS (no search)
+        * ------------------------------ */
+        $totalBuilder = $db->table('hpshrc_upload_files huf');
+        $totalBuilder->where('huf.upload_file_status', 'ACTIVE');
+        $totalBuilder->where('huf.upload_file_type', $category_code);
+
+        $recordsTotal = $totalBuilder->countAllResults();
+
+        /* ------------------------------
+        * FILTERED RECORDS (with search)
+        * ------------------------------ */
+        $filteredBuilder = $db->table('hpshrc_upload_files huf');
+        $filteredBuilder->join(
+            'hpshrc_categories hc',
+            'hc.category_code = huf.upload_file_type'
+        );
+        $filteredBuilder->where('huf.upload_file_status', 'ACTIVE');
+        $filteredBuilder->where('huf.upload_file_type', $category_code);
+
+        if (!empty($searchValue)) {
+            $filteredBuilder->groupStart()
+                ->like('huf.upload_file_title', $searchValue)
+                ->orLike('huf.upload_file_ref_no', $searchValue)
+                ->orLike('hc.category_title', $searchValue)
+            ->groupEnd();
         }
 
-        if ($order) {
+        $recordsFiltered = $filteredBuilder->countAllResults();
+
+        /* ------------------------------
+        * MAIN DATA QUERY (paginated)
+        * ------------------------------ */
+        $builder = $db->table('hpshrc_upload_files huf');
+        $builder->select(
+            'huf.upload_file_id,
+            huf.upload_file_original_name,
+            huf.upload_file_title,
+            huf.upload_file_desc,
+            huf.upload_file_ref_no,
+            huf.upload_file_type,
+            huf.upload_file_sub_type,
+            huf.upload_file_status,
+            huf.upload_file_location,
+            hc.category_title'
+        );
+
+        $builder->join(
+            'hpshrc_categories hc',
+            'hc.category_code = huf.upload_file_type'
+        );
+
+        $builder->where('huf.upload_file_status', 'ACTIVE');
+        $builder->where('huf.upload_file_type', $category_code);
+
+        if (!empty($searchValue)) {
+            $builder->groupStart()
+                ->like('huf.upload_file_title', $searchValue)
+                ->orLike('huf.upload_file_ref_no', $searchValue)
+                ->orLike('hc.category_title', $searchValue)
+            ->groupEnd();
+        }
+
+        // Default: latest first
+        $builder->orderBy('huf.upload_file_id', 'DESC');
+
+        // Override if DataTables sends ordering
+        if (!empty($column) && !empty($order)) {
             $builder->orderBy($column, $order);
         }
 
-        $builder->join('hpshrc_categories hc', 'hc.category_code = huf.upload_file_type');
         $builder->limit($limit, $offset);
-        $query = $builder->get();
 
+        $query   = $builder->get();
         $results = $query->getResult();
 
-        $list = array();
+        /* ------------------------------
+        * Format response data
+        * ------------------------------ */
+        $list = [];
 
-        if (! empty($results)) {
-            foreach ($results as $key => $row) {
-                $list[$key] = [
-                    "index" => $key + 1,
-                    "upload_file_ref_no" => $row->upload_file_ref_no,
-                    "upload_file_title" => $row->upload_file_title,
-                    "category_title_sub" => $row->category_title,
-                    "upload_file_desc" => $row->upload_file_desc,
-                    "download" => '<a class="download" href="'. base_url(route_to('get_file', $row->upload_file_id)) .'">Click here to download</a>',
-                ];
-            }
+        foreach ($results as $key => $row) {
+            $list[] = [
+                "index" => $offset + $key + 1,
+                "upload_file_ref_no" => $row->upload_file_ref_no,
+                "upload_file_title" => $row->upload_file_title,
+                "category_title_sub" => $row->category_title,
+                "upload_file_desc" => $row->upload_file_desc,
+                "download" => '<a class="download" href="' .
+                    base_url(route_to('get_file', $row->upload_file_id)) .
+                    '">Click here to download</a>',
+            ];
         }
 
+        /* ------------------------------
+        * DataTables response
+        * ------------------------------ */
         return $this->respond([
-            'draw' => $this->request->getVar('draw'),
-            'recordsTotal' => $total,
-            'recordsFiltered' => count($list),
-            'data' => (! empty($list)) ? $list : [],
+            'draw'            => (int) $this->request->getVar('draw'),
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $list,
         ], 200);
     }
 
