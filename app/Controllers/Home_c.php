@@ -96,7 +96,8 @@ class Home_c extends BaseController
     public function downloadList()
     {
         $category_code = $this->request->getVar('category_code');
-        $searchValue   = $this->request->getVar('search.value');
+        $search = $this->request->getVar('search');
+        $searchValue   = $search['value'] ?? '';
 
         $db = \Config\Database::connect();
 
